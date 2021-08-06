@@ -3,7 +3,12 @@
 
 import re
 import sys
+import argparse
 from openpyxl import load_workbook
+
+# Default scan range
+x_deep = 100
+y_deep = 100
 
 # Rewrite later, false positive with True values
 def is_num(n):
@@ -40,8 +45,11 @@ def search_rack(rack_x, rack_y):
             rack_unit = value
             label = get_label(x,rack_y)
             if label:
-                vendor = get_vendor(x,rack_y+1)
-                print(f"{rack_unit}: {label['size']} - {label['name']} - {vendor}")
+                vendor = get_info(x,rack_y+1)
+                model = get_info(x,rack_y+2)
+                serial = get_info(x,rack_y+3)
+                if vendor or model or serial:
+                    print(f"{rack_unit}: {label['size']} - {label['name']} - {vendor} {model} - {serial}")
             if int(value) == 1: break 
 
 def get_label(x,y):
@@ -59,7 +67,7 @@ def get_label(x,y):
     else: 
         return False
 
-def get_vendor(x,y):
+def get_info(x,y):
     #Getting to the top border
     if not ws.cell(row=x, column=y).border.top.style:
         for x in reversed(range(x-10,x)):
@@ -86,9 +94,10 @@ def xlsx_load():
 
 wb = xlsx_load()
 for ws in wb:
+    # Reading all worksheets in book
     print(ws.title)
-    for x in range(1,61):
-        for y in range(1,21):
+    for x in range(1,x_deep):
+        for y in range(1,y_deep):
             value = ws.cell(row=x, column=y).value
             if value:
                 output = re.search(r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+', str(value))
