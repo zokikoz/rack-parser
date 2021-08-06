@@ -2,6 +2,7 @@
 # Rack parser to flat file
 
 import re
+import sys
 from openpyxl import load_workbook
 
 # Rewrite later, false positive with True values
@@ -76,7 +77,14 @@ def get_vendor(x,y,ws):
             return False
     return False
 
-wb = load_workbook('./rack template.xlsx')
+def xlsx_load():
+    if sys.argv[1:]:
+        wb = load_workbook(sys.argv[1])
+        return wb
+    else:
+        sys.exit('Usage: rack-parser.py <filename.xlsx>')
+
+wb = xlsx_load()
 for ws in wb:
     print(ws.title)
     for x in range(1,61):
