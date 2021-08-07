@@ -6,14 +6,19 @@ import sys
 import argparse
 from openpyxl import load_workbook
 
-# Default scan range
-x_deep = 100
-y_deep = 100
+parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
+parser.add_argument('source', type=argparse.FileType('rb'),
+                    help='Rack view XLSX file')
+parser.add_argument('-x', '--row', default=100, metavar='X', type=int,
+                    help='Maximum row to scan (default 100)')
+parser.add_argument('-y', '--column', default=100, metavar='Y', type=int,
+                    help='Maximum column to scan (default 100)')
+args = parser.parse_args()
+print(args)
 
-# Rewrite later, false positive with True values
 def is_num(n):
     try:
-        if n:
+        if n and n is not True:
             int(n)
             return True
         else: return False
@@ -85,19 +90,13 @@ def get_info(x,y):
             return False
     return False
 
-def xlsx_load():
-    if sys.argv[1:]:
-        wb = load_workbook(sys.argv[1])
-        return wb
-    else:
-        sys.exit('Usage: rack-parser.py <filename.xlsx>')
 
-wb = xlsx_load()
+wb = load_workbook(args.filename)
 for ws in wb:
     # Reading all worksheets in book
     print(ws.title)
-    for x in range(1,x_deep):
-        for y in range(1,y_deep):
+    for x in range(1,args.row):
+        for y in range(1,args.column):
             value = ws.cell(row=x, column=y).value
             if value:
                 output = re.search(r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+', str(value))
