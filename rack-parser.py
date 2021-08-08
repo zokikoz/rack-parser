@@ -5,8 +5,11 @@ import re
 import argparse
 from openpyxl import load_workbook
 
-# Search string for rack id (format: XX1.XX1.NN), NN - used for rack number
-rack_id_regex = r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.(\w+)'
+# Search string for rack id (format: AA1.DC1.NN)
+# AA - Address
+# DC - Data center
+# NN - Rack number
+rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w\w)'
 
 parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
 parser.add_argument('source', type=argparse.FileType('rb'),
@@ -15,8 +18,8 @@ parser.add_argument('-x', '--row', default=1000, metavar='X', type=int,
                     help='Maximum row to scan (default 1000)')
 parser.add_argument('-y', '--column', default=1000, metavar='Y', type=int,
                     help='Maximum column to scan (default 1000)')
-parser.add_argument('-b', '--buffer', default=20, metavar='N', type=int,
-                    help='Break after N empty cells (default 20)')
+parser.add_argument('-b', '--buffer', default=100, metavar='N', type=int,
+                    help='Break after N empty cells (default 100)')
 args = parser.parse_args()
 
 def is_num(n):
@@ -52,7 +55,6 @@ def bottom_border(x, y, size):
 
 def search_rack(rack_x, rack_y):
     """Searching devices from rack id coordinates"""
-    #rack_devices = {}
     for x in range(rack_x, rack_x+60):
         value = ws.cell(row=x, column=rack_y-1).value
         # Finding units count
@@ -63,8 +65,9 @@ def search_rack(rack_x, rack_y):
                 vendor = get_info(x, rack_y+1)
                 model = get_info(x, rack_y+2)
                 serial = get_info(x, rack_y+3)
-                if vendor or model or serial:
-                    print(f"{rack_unit}: {label['size']} - {label['name']} - {vendor} {model} - {serial}")
+                dev = prepare_device(vendor, model, serial)
+                if dev:
+                    print(f"{cod} - {dev['model']} - {dev['serial']} - {label['name']} - {rack_num} - {rack_unit} - {label['size']}")
             # Stoping on last unit
             if int(value) == 1: break 
 
@@ -73,10 +76,10 @@ def get_label(x, y):
     # Checks that unit has top border in label, this means the device starts here
     if ws.cell(row=x, column=y).border.top.style:
         label = {'size': 1, 'name': ''}
-        for x in range(x, x+20):
+        for x in range(x, x+40):
             value = ws.cell(row=x, column=y).value
             if value:
-                label['name'] += value
+                label['name'] += str(value)
             if not bottom_border(x, y, label['size']): 
                 label['size'] += 1
             else: 
@@ -88,13 +91,13 @@ def get_label(x, y):
 
 def get_info(x, y):
     """Getting label attributes"""
-    #Getting to the top border, sometimes different labels can have one attribute for all located above 
+    #Getting to the top border. Sometimes different labels can have one attribute for all, located above 
     if not ws.cell(row=x, column=y).border.top.style:
-        for x in reversed(range(x-40,x)):
+        for x in reversed(range(x-40, x)):
             if ws.cell(row=x, column=y).border.top.style:
                 break
     #Getting down
-    for x in range(x, x+20):
+    for x in range(x, x+40):
         size = 1
         value = ws.cell(row=x, column=y).value
         if value:
@@ -104,6 +107,19 @@ def get_info(x, y):
         else: 
             return False
     return False
+
+def prepare_device(vendor, model, serial):
+    if vendor or model or serial:
+        rack_device = {}
+        if not vendor: vendor = ''
+        if not model: model = ''
+        if not serial: serial = ''
+        rack_device['model'] = str(vendor).strip() + ' ' + str(model).strip()
+        rack_device['serial'] = str(serial).strip()
+        return rack_device
+    else:
+        return False
+
 
 wb = load_workbook(args.source)
 for ws in wb:
@@ -120,13 +136,14 @@ for ws in wb:
                 # Search for rack id
                 output = re.search(rack_id_regex, str(value))
                 if output:
-                    print(value)
+                    cod = 'ЦОД-' + output.group(1) + '_' + output.group(2)
+                    rack_num = output.group(3)
+                    print(output.group(0))
                     search_rack(x, y)
             else:
                 break_count_col += 1
                 if break_count_col > args.buffer: break
+        # Checks for an empty stop buffer
         break_count_row += 1
         if row_not_empty: break_count_row = 1
-        if break_count_row > args.buffer: exit()
-
-
+        if break_count_row > args.buffer: break
