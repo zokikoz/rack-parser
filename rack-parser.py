@@ -5,13 +5,18 @@ import re
 import argparse
 from openpyxl import load_workbook
 
+# Search string for rack id (format: XX1.XX1.NN), NN - used for rack number
+rack_id_regex = r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.(\w+)'
+
 parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
 parser.add_argument('source', type=argparse.FileType('rb'),
                     help='Rack view XLSX file')
-parser.add_argument('-x', '--row', default=100, metavar='X', type=int,
-                    help='Maximum row to scan (default 100)')
-parser.add_argument('-y', '--column', default=100, metavar='Y', type=int,
-                    help='Maximum column to scan (default 100)')
+parser.add_argument('-x', '--row', default=1000, metavar='X', type=int,
+                    help='Maximum row to scan (default 1000)')
+parser.add_argument('-y', '--column', default=1000, metavar='Y', type=int,
+                    help='Maximum column to scan (default 1000)')
+parser.add_argument('-b', '--buffer', default=20, metavar='N', type=int,
+                    help='Break after N empty cells (default 20)')
 args = parser.parse_args()
 
 def is_num(n):
@@ -100,18 +105,28 @@ def get_info(x, y):
             return False
     return False
 
-
 wb = load_workbook(args.source)
 for ws in wb:
     # Reading all worksheets in book
     print(ws.title)
+    break_count_row = 1
     for x in range(1, args.row):
+        row_not_empty = False
+        break_count_col = 1
         for y in range(1, args.column):
             value = ws.cell(row=x, column=y).value
             if value:
-                # Search for rack id (format: XX1.XX1.*)
-                output = re.search(r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+', str(value))
+                row_not_empty = True
+                # Search for rack id
+                output = re.search(rack_id_regex, str(value))
                 if output:
                     print(value)
                     search_rack(x, y)
+            else:
+                break_count_col += 1
+                if break_count_col > args.buffer: break
+        break_count_row += 1
+        if row_not_empty: break_count_row = 1
+        if break_count_row > args.buffer: exit()
+
 
