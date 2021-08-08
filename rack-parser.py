@@ -10,7 +10,10 @@ from openpyxl import load_workbook
 # AA - Address
 # DC - Data center
 # NN - Rack number
-rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w\w)'
+rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w\w)$'
+ignore_list = [ r'^fc$', r'lc.\w\w', r'fc.\w\w', r'fc\d+', r'^pdu\d*', r'^smu$', r'^cmu$', r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+',
+                'empty', 'utp', 'reserve', 'organizer', 'service unit', 'pp-mm',
+                'shelf', 'tray', 'пусто', 'волс', 'патч', 'органайзер', 'полка', 'крс']
 address_book = {}
 
 parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
@@ -69,7 +72,7 @@ def search_rack(rack_x, rack_y):
                 vendor = get_info(x, rack_y+1)
                 model = get_info(x, rack_y+2)
                 serial = get_info(x, rack_y+3)
-                dev = prepare_device(vendor, model, serial)
+                dev = prepare_device(vendor, model, serial, label)
                 if dev:
                     print(f"{data_center} - {address} - {dev['model']} - {dev['serial']} - {label['name']} - {rack_num} - {rack_unit} - {label['size']}")
             # Stoping on last unit
@@ -83,13 +86,14 @@ def get_label(x, y):
         for x in range(x, x+40):
             value = ws.cell(row=x, column=y).value
             if value:
-                label['name'] += str(value)
+                label['name'] += str(value).strip()
             if not bottom_border(x, y, label['size']): 
                 label['size'] += 1
             else: 
                 break
-        if label['name']: return label
-        return False
+        #if label['name']: return label
+        #return False
+        return label
     else: 
         return False
 
@@ -105,21 +109,25 @@ def get_info(x, y):
         size = 1
         value = ws.cell(row=x, column=y).value
         if value:
-            return value
+            return str(value).strip()
         if not bottom_border(x, y, size):
             size += 1
         else: 
             return False
     return False
 
-def prepare_device(vendor, model, serial):
-    if vendor or model or serial:
-        rack_device = {}
+def prepare_device(vendor, model, serial, label):
+    if vendor or model or serial or label['name']:
         if not vendor: vendor = ''
         if not model: model = ''
         if not serial: serial = ''
-        rack_device['model'] = str(vendor).strip() + ' ' + str(model).strip()
-        rack_device['serial'] = str(serial).strip()
+        for stop_word in ignore_list:
+            for info in (vendor, model, serial, label['name']):
+                if re.search(stop_word, info, re.IGNORECASE): return False
+        rack_device = {}
+        if vendor.islower(): vendor = vendor.capitalize()
+        rack_device['model'] = (vendor + ' ' + model).strip()
+        rack_device['serial'] = serial
         return rack_device
     else:
         return False
@@ -148,7 +156,7 @@ for ws in wb:
             if value:
                 row_not_empty = True
                 # Search for rack id
-                output = re.search(rack_id_regex, str(value))
+                output = re.match(rack_id_regex, str(value))
                 if output:
                     data_center = 'ЦОД-' + output.group(1) + '_' + output.group(2)
                     address = set_address(output.group(1))
