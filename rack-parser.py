@@ -2,9 +2,16 @@
 # Rack parser to flat file
 
 import re
+import sys
 import json
 import argparse
 from openpyxl import load_workbook
+
+JUMP_LEFT_SEQ = '\u001b[100D'
+
+devices = 0
+racks = 0
+ignored = 0
 
 # Search string for rack id (format: AA1.DC1.NN)
 # AA - Address
@@ -27,6 +34,7 @@ parser.add_argument('-b', '--buffer', default=100, metavar='N', type=int,
                     help='Break after N empty cells (default 100)')
 parser.add_argument('-a', '--addr', metavar='json', type=argparse.FileType('r'),
                     help='Address book JSON file')
+parser.add_argument('-v', '--verbose', help="More information")
 args = parser.parse_args()
 
 def is_num(n):
@@ -72,7 +80,13 @@ def search_rack(rack_x, rack_y):
                 serial = get_info(x, rack_y+3, label['size'])
                 dev = prepare_device(vendor, model, serial, label)
                 if dev:
-                    print(f"{data_center} - {address} - {dev['model']} - {dev['serial']} - {label['name']} - {rack_num} - {rack_unit} - {label['size']}")
+                    devices += 1
+                    if args.verbose:
+                        print(f"{data_center};{address};{dev['model']};{dev['serial']};{label['name']};{rack_num};{rack_unit};{label['size']}")
+                    else:
+                        print(JUMP_LEFT_SEQ, end='')
+                        print(f'{rack_id} {racks} {devices} {ignored}', end='')
+                        sys.stdout.flush()
                     #result.write(f"{data_center};{address};{dev['model']};{dev['serial']};{label['name']};{rack_num};{rack_unit};{label['size']};\n")
             # Stoping on last unit
             if int(value) == 1: break 
@@ -92,6 +106,7 @@ def get_label(x, y):
                 break
         return label
     else:
+        ignored += 1
         #print(f'No top border: {x}')
         return False
 
@@ -159,10 +174,11 @@ for ws in wb:
                 # Search for rack id
                 output = re.match(rack_id_regex, str(value))
                 if output:
+                    racks += 1
                     data_center = 'ЦОД-' + output.group(1) + '_' + output.group(2)
                     address = set_address(output.group(1))
                     rack_num = output.group(3)
-                    print(output.group(0))
+                    rack_id = output.group(0)
                     search_rack(x, y)
             else:
                 break_count_col += 1
