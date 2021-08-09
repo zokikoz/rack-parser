@@ -4,24 +4,23 @@
 import re
 import sys
 import json
+import time
 import argparse
 from openpyxl import load_workbook
 
 JUMP_LEFT_SEQ = '\u001b[100D'
 
-devices = 0
-racks = 0
-ignored = 0
-
 # Search string for rack id (format: AA1.DC1.NN)
 # AA - Address
 # DC - Data center
 # NN - Rack number
-rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w{1,2})$'
-ignore_list = [ r'^fc$', r'lc.\w\w', r'fc.\w\w', r'fc\d+', r'^pdu\d*', r'^smu$', r'^cmu$', r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+',
+rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w{1,3})$'
+ignore_list = [ r'^fc$', r'^lc.\w\w', r'^fc.\w\w', r'^fc\d+', r'^pdu\d*', r'^smu$', r'^cmu$', r'^lisa$',
                 'empty', 'utp', 'reserve', 'organizer', 'service unit', 'pp-mm', 'patch',
                 'shelf', 'tray', 'пусто', 'волс', 'патч', 'органайзер', 'полка', 'крс']
 address_book = {}
+
+start = time.monotonic()
 
 parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
 parser.add_argument('source', type=argparse.FileType('rb'),
@@ -34,7 +33,7 @@ parser.add_argument('-b', '--buffer', default=100, metavar='N', type=int,
                     help='Break after N empty cells (default 100)')
 parser.add_argument('-a', '--addr', metavar='json', type=argparse.FileType('r'),
                     help='Address book JSON file')
-parser.add_argument('-v', '--verbose', help="More information")
+parser.add_argument('-v', '--verbose', help='More information', action='store_true')
 args = parser.parse_args()
 
 def is_num(n):
@@ -66,7 +65,7 @@ def bottom_border(x, y, size):
     else:
         return False
 
-def search_rack(rack_x, rack_y):
+def search_rack(rack_x, rack_y, progress):
     """Searching devices from rack id coordinates"""
     for x in range(rack_x, rack_x+60):
         value = ws.cell(row=x, column=rack_y-1).value
@@ -78,16 +77,20 @@ def search_rack(rack_x, rack_y):
                 vendor = get_info(x, rack_y+1, label['size'])
                 model = get_info(x, rack_y+2, label['size'])
                 serial = get_info(x, rack_y+3, label['size'])
-                dev = prepare_device(vendor, model, serial, label)
+                dev = prepare_device(vendor, model, serial, label, rack_id, rack_unit, progress)
                 if dev:
-                    devices += 1
+                    csv = data_center + ';' + address + ';' + dev['model'] + ';' + dev['serial'] + ';' \
+                        + label['name'] + ';' + str(rack_num) + ';' + str(rack_unit) + ';' + str(label['size'])
+                    progress['devices'] += 1
                     if args.verbose:
-                        print(f"{data_center};{address};{dev['model']};{dev['serial']};{label['name']};{rack_num};{rack_unit};{label['size']}")
+                        print(f"{progress['devices']}.{csv}")
                     else:
                         print(JUMP_LEFT_SEQ, end='')
-                        print(f'{rack_id} {racks} {devices} {ignored}', end='')
+                        print(f"Processing: {rack_id} (racks: {progress['racks']}, found: {progress['devices']}, "
+                              f"ignored: {progress['ignored']})", end='')
                         sys.stdout.flush()
-                    #result.write(f"{data_center};{address};{dev['model']};{dev['serial']};{label['name']};{rack_num};{rack_unit};{label['size']};\n")
+                    with open('result.csv', 'a') as result:
+                        result.write(f'{csv}\n')
             # Stoping on last unit
             if int(value) == 1: break 
 
@@ -99,34 +102,24 @@ def get_label(x, y):
         for x in range(x, x+40):
             value = ws.cell(row=x, column=y).value
             if value:
-                label['name'] += str(value).strip().replace('\n', ' ')
+                label['name'] += str(value).strip().replace('\n', ' ').replace(';',' ')
             if not bottom_border(x, y, label['size']): 
                 label['size'] += 1
             else: 
                 break
         return label
     else:
-        ignored += 1
-        #print(f'No top border: {x}')
         return False
 
 def get_info(x, y, unit_size):
     """Getting label attributes"""
-    #Getting to the top border. Sometimes different labels can have one attribute for all, located above
-    shift_up = 0
-    if not ws.cell(row=x, column=y).border.top.style or not ws.cell(row=x-1, column=y).border.bottom.style:
-        for x in reversed(range(x-40, x)):
-            shift_up += 1 
-            if ws.cell(row=x, column=y).border.top.style or not ws.cell(row=x-1, column=y).border.bottom.style:
-                break
-    #Getting down
-    for x in range(x, x+shift_up+unit_size):
+    for x in range(x, x+unit_size):
         value = ws.cell(row=x, column=y).value
         if value:
-            return str(value).strip().replace('\n', ' ')
+            return str(value).strip().replace('\n', ' ').replace(';',' ')
     return False
 
-def prepare_device(vendor, model, serial, label):
+def prepare_device(vendor, model, serial, label, rack_id, rack_unit, progress):
     """Preparing the device attributes output"""
     if vendor or model or serial or label['name']:
         if not vendor: vendor = ''
@@ -134,8 +127,14 @@ def prepare_device(vendor, model, serial, label):
         if not serial: serial = ''
         for stop_word in ignore_list:
             for info in (vendor, model, label['name']):
-                if re.search(stop_word, info, re.IGNORECASE):
-                    #print(f"Ignoring: {vendor} {model} {serial} {label['name']}")
+                if re.search(stop_word, info, re.IGNORECASE) and not serial:
+                    progress['ignored'] += 1
+                    csv = rack_id + ';' + (vendor + ' ' + model).strip() + ';' \
+                        + label['name'] + ';' + str(rack_unit) + ';' + str(label['size'])
+                    if args.verbose:
+                        print(f"IGNORED: {progress['ignored']}.{csv}")
+                    with open('ignore.csv', 'a') as ignore:
+                        ignore.write(f'{csv}\n')
                     return False
         rack_device = {}
         if vendor.islower(): vendor = vendor.capitalize()
@@ -157,12 +156,22 @@ if args.addr:
     with open(args.addr.name) as json_file:
         address_book = json.load(json_file)
 
-#result = open("result.csv", "w")
+# Clearing output files
+open('result.csv', 'w').close()
+open('ignore.csv', 'w').close()
+# Writing headers
+with open('result.csv', 'a') as result:
+    result.write('Площадка;Адрес;Модель;S/N;Label;Стойка;Место в стойке;Кол-во юнитов\n')
+with open('ignore.csv', 'a') as ignore:
+    ignore.write('Идентификатор стойки;Модель;Label;Место в стойке;Кол-во юнитов\n')
 
 wb = load_workbook(args.source)
+
+progress = {'devices': 0, 'racks': 0, 'ignored': 0}
+
 for ws in wb:
     # Reading all worksheets in book
-    print(ws.title)
+    #print(ws.title)
     break_count_row = 1
     for x in range(1, args.row):
         row_not_empty = False
@@ -174,12 +183,12 @@ for ws in wb:
                 # Search for rack id
                 output = re.match(rack_id_regex, str(value))
                 if output:
-                    racks += 1
+                    progress['racks'] += 1
                     data_center = 'ЦОД-' + output.group(1) + '_' + output.group(2)
                     address = set_address(output.group(1))
                     rack_num = output.group(3)
                     rack_id = output.group(0)
-                    search_rack(x, y)
+                    search_rack(x, y, progress)
             else:
                 break_count_col += 1
                 if break_count_col > args.buffer: break
@@ -187,4 +196,7 @@ for ws in wb:
         break_count_row += 1
         if row_not_empty: break_count_row = 1
         if break_count_row > args.buffer: break
-#result.close()
+
+elapsed = round(time.monotonic() - start)
+m, s = divmod(elapsed, 60)
+print(f'\nElapsed time: {m}m {s}s')
