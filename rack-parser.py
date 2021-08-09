@@ -10,9 +10,9 @@ from openpyxl import load_workbook
 # AA - Address
 # DC - Data center
 # NN - Rack number
-rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w\w)$'
+rack_id_regex = r'([A-Z][A-Z]\d)\.([A-Z][A-Z]\d)\.(\w{1,2})$'
 ignore_list = [ r'^fc$', r'lc.\w\w', r'fc.\w\w', r'fc\d+', r'^pdu\d*', r'^smu$', r'^cmu$', r'[A-Z][A-Z]\d\.[A-Z][A-Z]\d\.\w+',
-                'empty', 'utp', 'reserve', 'organizer', 'service unit', 'pp-mm',
+                'empty', 'utp', 'reserve', 'organizer', 'service unit', 'pp-mm', 'patch',
                 'shelf', 'tray', 'пусто', 'волс', 'патч', 'органайзер', 'полка', 'крс']
 address_book = {}
 
@@ -49,13 +49,11 @@ def is_merge(row, column):
 
 def bottom_border(x, y, size):
     """Checks that the bottom border is found"""
-    # First merged cell always has a border, so they need to be ignored
+    # First merged cell has a border of whole range, so it need to be ignored
     if is_merge(x, y) is True and size == 1:
-        # It can lead to an error if cell only horizontal merged. Need to figure it out
         return False
-    elif is_merge(x,y) is False and ws.cell(row=x, column=y).border.bottom.style:
-        return True
-    elif is_merge(x,y) is True and ws.cell(row=x, column=y).border.bottom.style:
+    # Checking bottom border of the current cell and top border of the cell under current one
+    elif ws.cell(row=x, column=y).border.bottom.style or ws.cell(row=x+1, column=y).border.top.style:
         return True
     else:
         return False
@@ -69,61 +67,61 @@ def search_rack(rack_x, rack_y):
             rack_unit = value
             label = get_label(x, rack_y)
             if label:
-                vendor = get_info(x, rack_y+1)
-                model = get_info(x, rack_y+2)
-                serial = get_info(x, rack_y+3)
+                vendor = get_info(x, rack_y+1, label['size'])
+                model = get_info(x, rack_y+2, label['size'])
+                serial = get_info(x, rack_y+3, label['size'])
                 dev = prepare_device(vendor, model, serial, label)
                 if dev:
                     print(f"{data_center} - {address} - {dev['model']} - {dev['serial']} - {label['name']} - {rack_num} - {rack_unit} - {label['size']}")
+                    #result.write(f"{data_center};{address};{dev['model']};{dev['serial']};{label['name']};{rack_num};{rack_unit};{label['size']};\n")
             # Stoping on last unit
             if int(value) == 1: break 
 
 def get_label(x, y):
     """Getting label name and size"""
-    # Checks that unit has top border in label, this means the device starts here
-    if ws.cell(row=x, column=y).border.top.style:
+    # Checks that unit has top border in label or bottom border above, this means the device starts here
+    if ws.cell(row=x, column=y).border.top.style or (ws.cell(row=x-1, column=y).border.bottom.style and not is_merge(x-1, y)):
         label = {'size': 1, 'name': ''}
         for x in range(x, x+40):
             value = ws.cell(row=x, column=y).value
             if value:
-                label['name'] += str(value).strip()
+                label['name'] += str(value).strip().replace('\n', ' ')
             if not bottom_border(x, y, label['size']): 
                 label['size'] += 1
             else: 
                 break
-        #if label['name']: return label
-        #return False
         return label
-    else: 
+    else:
+        #print(f'No top border: {x}')
         return False
 
-def get_info(x, y):
+def get_info(x, y, unit_size):
     """Getting label attributes"""
-    #Getting to the top border. Sometimes different labels can have one attribute for all, located above 
-    if not ws.cell(row=x, column=y).border.top.style:
+    #Getting to the top border. Sometimes different labels can have one attribute for all, located above
+    shift_up = 0
+    if not ws.cell(row=x, column=y).border.top.style or not ws.cell(row=x-1, column=y).border.bottom.style:
         for x in reversed(range(x-40, x)):
-            if ws.cell(row=x, column=y).border.top.style:
+            shift_up += 1 
+            if ws.cell(row=x, column=y).border.top.style or not ws.cell(row=x-1, column=y).border.bottom.style:
                 break
     #Getting down
-    for x in range(x, x+40):
-        size = 1
+    for x in range(x, x+shift_up+unit_size):
         value = ws.cell(row=x, column=y).value
         if value:
-            return str(value).strip()
-        if not bottom_border(x, y, size):
-            size += 1
-        else: 
-            return False
+            return str(value).strip().replace('\n', ' ')
     return False
 
 def prepare_device(vendor, model, serial, label):
+    """Preparing the device attributes output"""
     if vendor or model or serial or label['name']:
         if not vendor: vendor = ''
         if not model: model = ''
         if not serial: serial = ''
         for stop_word in ignore_list:
-            for info in (vendor, model, serial, label['name']):
-                if re.search(stop_word, info, re.IGNORECASE): return False
+            for info in (vendor, model, label['name']):
+                if re.search(stop_word, info, re.IGNORECASE):
+                    #print(f"Ignoring: {vendor} {model} {serial} {label['name']}")
+                    return False
         rack_device = {}
         if vendor.islower(): vendor = vendor.capitalize()
         rack_device['model'] = (vendor + ' ' + model).strip()
@@ -133,6 +131,7 @@ def prepare_device(vendor, model, serial, label):
         return False
 
 def set_address(addr_id):
+    """Setting address from dictionary"""
     for id, address in address_book.items():
         if id == addr_id:
             return address
@@ -142,6 +141,8 @@ def set_address(addr_id):
 if args.addr:
     with open(args.addr.name) as json_file:
         address_book = json.load(json_file)
+
+#result = open("result.csv", "w")
 
 wb = load_workbook(args.source)
 for ws in wb:
@@ -170,3 +171,4 @@ for ws in wb:
         break_count_row += 1
         if row_not_empty: break_count_row = 1
         if break_count_row > args.buffer: break
+#result.close()
