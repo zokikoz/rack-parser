@@ -8,8 +8,6 @@ import time
 import argparse
 from openpyxl import load_workbook
 
-JUMP_LEFT_SEQ = '\u001b[100D'
-
 # Search string for rack id (format: AA1.DC1.NN)
 # AA - Address
 # DC - Data center
@@ -19,8 +17,6 @@ ignore_list = [ r'^fc$', r'^lc.\w\w', r'^fc.\w\w', r'^fc\d+', r'^pdu\d*', r'^smu
                 'empty', 'utp', 'reserve', 'organizer', 'service unit', 'pp-mm', 'patch',
                 'shelf', 'tray', 'пусто', 'волс', 'патч', 'органайзер', 'полка', 'крс']
 address_book = {}
-
-start = time.monotonic()
 
 parser = argparse.ArgumentParser(description='Converts rack unit view to flat inventory file')
 parser.add_argument('source', type=argparse.FileType('rb'),
@@ -85,7 +81,6 @@ def search_rack(rack_x, rack_y, progress):
                     if args.verbose:
                         print(f"{progress['devices']}.{csv}")
                     else:
-                        #print(JUMP_LEFT_SEQ, end='')
                         print(f"\rProcessing: {rack_id} (racks: {progress['racks']}, found: {progress['devices']}, "
                               f"ignored: {progress['ignored']})", end='')
                         sys.stdout.flush()
@@ -152,6 +147,9 @@ def set_address(addr_id):
     return ''
 
 
+start = time.monotonic()
+progress = {'devices': 0, 'racks': 0, 'ignored': 0}
+
 if args.addr:
     with open(args.addr.name) as json_file:
         address_book = json.load(json_file)
@@ -166,9 +164,6 @@ with open('ignore.csv', 'a') as ignore:
     ignore.write('Идентификатор стойки;Модель;Label;Место в стойке;Кол-во юнитов\n')
 
 wb = load_workbook(args.source)
-
-progress = {'devices': 0, 'racks': 0, 'ignored': 0}
-
 for ws in wb:
     # Reading all worksheets in book
     #print(ws.title)
