@@ -85,8 +85,8 @@ def search_rack(rack_x, rack_y, progress):
                     if args.verbose:
                         print(f"{progress['devices']}.{csv}")
                     else:
-                        print(JUMP_LEFT_SEQ, end='')
-                        print(f"Processing: {rack_id} (racks: {progress['racks']}, found: {progress['devices']}, "
+                        #print(JUMP_LEFT_SEQ, end='')
+                        print(f"\rProcessing: {rack_id} (racks: {progress['racks']}, found: {progress['devices']}, "
                               f"ignored: {progress['ignored']})", end='')
                         sys.stdout.flush()
                     with open('result.csv', 'a') as result:
