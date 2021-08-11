@@ -3,6 +3,7 @@
 
 import sys
 import csv
+import os
 
 dc_invent_db = []
 sm_id_db = []
@@ -12,7 +13,8 @@ def check_row(dc_row, sm_row, sm_id, type, count):
         if dc_row.lower() == sm_row.lower():
             count['total'] += 1
             print(f'\r{sm_id}: found {type} {sm_row} in {dc_row} '
-                f"({count['total']} matches: {count['serial']} by serial, {count['label']} by label)\033[K", end='')
+                f"({count['total']} matches: {count['serial']} by serial, {count['label']} by label)", end='')
+            print(' '*5, end='') if os.name == 'nt' else print('\033[K', end='')
             sys.stdout.flush()
             if type == 'serial':
                 count['serial'] += 1
